@@ -1,0 +1,73 @@
+
+Constraint file
+
+# ==========================================================
+# Clock
+# ==========================================================
+set_property PACKAGE_PIN W5 [get_ports clk]
+set_property IOSTANDARD LVCMOS33 [get_ports clk]
+# Assuming a 100MHz clock (10.00 ns period) based on your Verilog parameter
+create_clock -add -name sys_clk_pin -period 10.00 -waveform {0 5} [get_ports clk]
+
+# ==========================================================
+# Reset (BTN_C)
+# ==========================================================
+set_property PACKAGE_PIN U18 [get_ports reset]
+set_property IOSTANDARD LVCMOS33 [get_ports reset]
+set_property IOSTANDARD LVCMOS33 [get_ports pump2_delta]
+set_property IOSTANDARD LVCMOS33 [get_ports pump2_star]
+
+# ==========================================================
+# Switches [15:0] (Inputs)
+# ==========================================================
+set_property IOSTANDARD LVCMOS33 [get_ports {switches[*]}]
+
+set_property PACKAGE_PIN V17 [get_ports {switches[0]}] ; # SW0: plc_start1
+set_property PACKAGE_PIN V16 [get_ports {switches[1]}] ; # SW1: plc_stop1
+set_property PACKAGE_PIN W16 [get_ports {switches[2]}] ; # SW2: safety
+# set_property PACKAGE_PIN W17 [get_ports {switches[3]}] ; # SW3: UNUSED
+set_property PACKAGE_PIN W15 [get_ports {switches[4]}] ; # SW4: plc_start2
+set_property PACKAGE_PIN V15 [get_ports {switches[5]}] ; # SW5: plc_stop2
+# set_property PACKAGE_PIN W14 [get_ports {switches[6]}] ; # SW6: UNUSED
+# set_property PACKAGE_PIN W13 [get_ports {switches[7]}] ; # SW7: UNUSED
+set_property PACKAGE_PIN V2 [get_ports {switches[8]}] ; # SW8: hard_start1
+set_property PACKAGE_PIN T3 [get_ports {switches[9]}] ; # SW9: hard_stop1
+set_property PACKAGE_PIN T2 [get_ports {switches[10]}] ; # SW10: hard_start2
+set_property PACKAGE_PIN R3 [get_ports {switches[11]}] ; # SW11: hard_stop2
+set_property PACKAGE_PIN W2 [get_ports {switches[12]}] ; # SW12: local_start1
+set_property PACKAGE_PIN U1 [get_ports {switches[13]}] ; # SW13: local_start2
+# set_property PACKAGE_PIN T1 [get_ports {switches[14]}] ; # SW14: UNUSED
+# set_property PACKAGE_PIN R2 [get_ports {switches[15]}] ; # SW15: UNUSED
+
+# ==========================================================
+# LEDs (LD0-LD11) (Outputs)
+# ==========================================================
+set_property IOSTANDARD LVCMOS33 [get_ports {led_plc_start1 led_hard_start1 led_local_start1 led_pump1_status led_pump1_star led_pump1_delta led_plc_start2 led_hard_start2 led_local_start2 led_pump2_status led_pump2_star led_pump2_delta}]
+
+# Pump 1 Status LEDs
+set_property PACKAGE_PIN U16 [get_ports led_plc_start1]
+set_property PACKAGE_PIN E19 [get_ports led_hard_start1]
+set_property PACKAGE_PIN U19 [get_ports led_local_start1]
+set_property PACKAGE_PIN V19 [get_ports led_pump1_status]
+set_property PACKAGE_PIN W18 [get_ports led_pump1_star]
+set_property PACKAGE_PIN U15 [get_ports led_pump1_delta]
+
+# Pump 2 Status LEDs
+set_property PACKAGE_PIN U14 [get_ports led_plc_start2]
+set_property PACKAGE_PIN V14 [get_ports led_hard_start2]
+set_property PACKAGE_PIN V13 [get_ports led_local_start2]
+set_property PACKAGE_PIN V3 [get_ports led_pump2_status]
+set_property PACKAGE_PIN W3 [get_ports led_pump2_star]
+set_property PACKAGE_PIN U3 [get_ports led_pump2_delta]
+
+# ==========================================================
+# Pump Outputs (PMOD JC)
+# ==========================================================
+set_property IOSTANDARD LVCMOS33 [get_ports {pump1 pump2 pump1_star pump1_delta pump2_star pump2_delta}]
+
+set_property PACKAGE_PIN L17 [get_ports pump1]
+set_property PACKAGE_PIN M18 [get_ports pump2]
+set_property PACKAGE_PIN N17 [get_ports pump1_star]
+set_property PACKAGE_PIN P18 [get_ports pump1_delta]
+set_property PACKAGE_PIN L16 [get_ports pump2_star]
+set_property PACKAGE_PIN M17 [get_ports pump2_delta]

@@ -1,0 +1,271 @@
+`timescale 1ns / 1ps
+module pump_control_star_delta_interlock (
+    input wire clk,
+    input wire reset,
+    input wire [15:0] switches, // SW0-SW15
+
+    output reg pump1,
+    output reg pump2,
+
+    output reg pump1_star,
+    output reg pump1_delta,
+    output reg pump2_star,
+    output reg pump2_delta,
+
+    // LEDs for PLS Start and Status are driven by internal registers (output reg)
+    output reg led_plc_start1,
+    output reg led_pump1_status,
+    output reg led_pump1_star,
+    output reg led_pump1_delta,
+    output reg led_plc_start2,
+    output reg led_pump2_status,
+    output reg led_pump2_star,
+    output reg led_pump2_delta,
+    
+    // Hard-wired LED assignments
+    output wire led_hard_start1,
+    output wire led_local_start1,
+    output wire led_hard_start2,
+    output wire led_local_start2
+);
+
+    // Parameters
+    parameter CLOCK_FREQ = 100_000_000;
+    parameter PULSE_DURATION_SEC = 5;
+    parameter STAR_DELTA_DELAY_SEC = 6;
+    parameter STAR_DELTA_COUNT_TARGET = CLOCK_FREQ * STAR_DELTA_DELAY_SEC; 
+
+    localparam integer PULSE_COUNT_TARGET = CLOCK_FREQ * PULSE_DURATION_SEC;
+
+    // Switch mappings (Input Wires)
+    wire plc_start1 = switches[0];
+    wire plc_stop1 = switches[1];
+    wire safety = switches[2];
+    wire plc_start2 = switches[4];
+    wire plc_stop2 = switches[5];
+    wire hard_start1 = switches[8];
+    wire hard_stop1 = switches[9];
+    wire hard_start2 = switches[10];
+    wire hard_stop2 = switches[11];
+    wire local_start1 = switches[12];
+    wire local_start2 = switches[13];
+
+    // FSM states
+    localparam IDLE = 2'b00;
+    localparam STAR = 2'b01;
+    localparam DELTA = 2'b10;
+
+    // ==========================================================
+    // ** FIX 1: Input Synchronization and Edge Detection **
+    // ==========================================================
+    
+    // Registers for synchronization (Double-Flip-Flop Synchronizer)
+    reg plc_start1_s0, plc_start1_s1;
+    reg plc_stop1_s0, plc_stop1_s1;
+    reg safety_s0, safety_s1;
+    reg plc_start2_s0, plc_start2_s1;
+    reg plc_stop2_s0, plc_stop2_s1;
+    reg hard_stop1_s0, hard_stop1_s1;
+    reg hard_stop2_s0, hard_stop2_s1;
+    
+    // Synchronous Wires (Used in FSM and Latch Logic)
+    wire s_plc_start1 = plc_start1_s1;
+    wire s_plc_stop1 = plc_stop1_s1;
+    wire s_safety = safety_s1;
+    wire s_plc_start2 = plc_start2_s1;
+    wire s_plc_stop2 = plc_stop2_s1;
+    wire s_hard_stop1 = hard_stop1_s1;
+    wire s_hard_stop2 = hard_stop2_s1;
+    
+    // Edge Detection for Momentary PLC Start
+    reg plc_start1_last, plc_start2_last;
+    wire plc_start1_pulse = s_plc_start1 && !plc_start1_last; // Rising edge detector
+    wire plc_start2_pulse = s_plc_start2 && !plc_start2_last; // Rising edge detector
+
+    // Asynchronous Input Synchronization Logic
+    always @(posedge clk) begin
+        if (reset) begin
+            plc_start1_s0 <= 0; plc_start1_s1 <= 0; plc_start1_last <= 0;
+            plc_stop1_s0 <= 0; plc_stop1_s1 <= 0;
+            safety_s0 <= 0; safety_s1 <= 0;
+            plc_start2_s0 <= 0; plc_start2_s1 <= 0; plc_start2_last <= 0;
+            plc_stop2_s0 <= 0; plc_stop2_s1 <= 0;
+            hard_stop1_s0 <= 0; hard_stop1_s1 <= 0;
+            hard_stop2_s0 <= 0; hard_stop2_s1 <= 0;
+        end else begin
+            // Synchronizers
+            plc_start1_s0 <= plc_start1; plc_start1_s1 <= plc_start1_s0;
+            plc_stop1_s0 <= plc_stop1; plc_stop1_s1 <= plc_stop1_s0;
+            safety_s0 <= safety; safety_s1 <= safety_s0;
+            plc_start2_s0 <= plc_start2; plc_start2_s1 <= plc_start2_s0;
+            plc_stop2_s0 <= plc_stop2; plc_stop2_s1 <= plc_stop2_s0;
+            hard_stop1_s0 <= hard_stop1; hard_stop1_s1 <= hard_stop1_s0;
+            hard_stop2_s0 <= hard_stop2; hard_stop2_s1 <= hard_stop2_s0;
+
+            // Edge Detector 'Last' registers
+            plc_start1_last <= s_plc_start1;
+            plc_start2_last <= s_plc_start2;
+        end
+    end
+    
+    // ==========================================================
+    // Internal Registers (using corrected synchronous inputs)
+    // ==========================================================
+    reg [31:0] pulse_counter1, pulse_counter2;
+    reg start1_latched, start2_latched; // PLC Start Latch
+    reg [1:0] star_delta_state1, star_delta_state2;
+    reg [31:0] star_delta_counter1, star_delta_counter2;
+
+    // Direct LED assignments (These switches do not need to be synchronized)
+    assign led_hard_start1 = hard_start1;
+    assign led_local_start1 = local_start1;
+    assign led_hard_start2 = hard_start2;
+    assign led_local_start2 = local_start2;
+
+    // Latch logic for Pump 1 (PLC Start is a momentary push button)
+    always @(posedge clk or posedge reset) begin
+        if (reset) begin
+            pulse_counter1 <= 0;
+            start1_latched <= 0;
+        end else begin
+            // Latch ON: Use the single-cycle PLC start pulse
+            if (plc_start1_pulse && !start1_latched && !pump2_star) begin
+                start1_latched <= 1;
+                pulse_counter1 <= 1;
+            end else if (start1_latched && pulse_counter1 < PULSE_COUNT_TARGET) begin
+                pulse_counter1 <= pulse_counter1 + 1;
+            end
+            // Latch OFF: Use synchronized stop switches
+            if (s_plc_stop1 || s_hard_stop1)
+                start1_latched <= 0;
+        end
+    end
+
+    // Latch logic for Pump 2
+    always @(posedge clk or posedge reset) begin
+        if (reset) begin
+            pulse_counter2 <= 0;
+            start2_latched <= 0;
+        end else begin
+            // Latch ON: Use the single-cycle PLC start pulse
+            if (plc_start2_pulse && !start2_latched && !pump1_star) begin
+                start2_latched <= 1;
+                pulse_counter2 <= 1;
+            end else if (start2_latched && pulse_counter2 < PULSE_COUNT_TARGET) begin
+                pulse_counter2 <= pulse_counter2 + 1;
+            end
+            // Latch OFF: Use synchronized stop switches
+            if (s_plc_stop2 || s_hard_stop2)
+                start2_latched <= 0;
+        end
+    end
+
+    // Pump ON logic (Master logic) - Safety check uses synchronized input
+    always @(*) begin
+        // Pump 1: Activated by any start signal (PLC latch, Hard, Local) AND Synchronized Safety AND NOT Synchronized Hard Stop
+        pump1 = ((start1_latched | hard_start1 | local_start1) & ~s_hard_stop1) & s_safety;
+        
+        // Pump 2: Activated by any start signal AND Synchronized Safety AND NOT Synchronized Hard Stop
+        pump2 = ((start2_latched | hard_start2 | local_start2) & ~s_hard_stop2) & s_safety; 
+    end
+
+    // Pump 1 star/delta FSM (No changes needed, as it depends on synchronous 'pump1')
+    always @(posedge clk or posedge reset) begin
+      // ... (FSM logic is unchanged)
+        if (reset) begin
+            star_delta_state1 <= IDLE;
+            star_delta_counter1 <= 0;
+            pump1_star <= 0;
+            pump1_delta <= 0;
+        end else begin
+            case (star_delta_state1)
+                IDLE: begin
+                    pump1_star <= 0;
+                    pump1_delta <= 0;
+                    star_delta_counter1 <= 0;
+                    if (pump1) begin
+                        star_delta_state1 <= STAR;
+                        pump1_star <= 1;
+                    end
+                end
+                STAR: begin
+                    if (!pump1) begin
+                        star_delta_state1 <= IDLE;
+                    end else if (star_delta_counter1 < STAR_DELTA_COUNT_TARGET) begin
+                        star_delta_counter1 <= star_delta_counter1 + 1;
+                        pump1_star <= 1;
+                    end else begin
+                        star_delta_state1 <= DELTA;
+                        pump1_star <= 0; 
+                        pump1_delta <= 1; 
+                        star_delta_counter1 <= 0;
+                    end
+                end
+                DELTA: begin
+                    pump1_star <= 0;
+                    pump1_delta <= 1;
+                    if (!pump1) begin
+                        star_delta_state1 <= IDLE;
+                    end
+                end
+            endcase
+        end
+    end
+
+    // Pump 2 star/delta FSM (No changes needed, as it depends on synchronous 'pump2')
+    always @(posedge clk or posedge reset) begin
+      // ... (FSM logic is unchanged)
+        if (reset) begin
+            star_delta_state2 <= IDLE;
+            star_delta_counter2 <= 0;
+            pump2_star <= 0;
+            pump2_delta <= 0;
+        end else begin
+            case (star_delta_state2)
+                IDLE: begin
+                    pump2_star <= 0;
+                    pump2_delta <= 0;
+                    star_delta_counter2 <= 0;
+                    if (pump2) begin
+                        star_delta_state2 <= STAR;
+                        pump2_star <= 1;
+                    end
+                end
+                STAR: begin
+                    if (!pump2) begin
+                        star_delta_state2 <= IDLE;
+                    end else if (star_delta_counter2 < STAR_DELTA_COUNT_TARGET) begin
+                        star_delta_counter2 <= star_delta_counter2 + 1;
+                        pump2_star <= 1;
+                    end else begin
+                        star_delta_state2 <= DELTA;
+                        pump2_star <= 0; 
+                        pump2_delta <= 1; 
+                        star_delta_counter2 <= 0;
+                    end
+                end
+                DELTA: begin
+                    pump2_star <= 0;
+                    pump2_delta <= 1;
+                    if (!pump2) begin
+                        star_delta_state2 <= IDLE;
+                    end
+                end
+            endcase
+        end
+    end
+
+    // LED indicators driven by FSM/Latch status (output reg)
+    always @(*) begin
+        led_plc_start1 = start1_latched;
+        led_pump1_status= pump1;
+        led_pump1_star = pump1_star;
+        led_pump1_delta = pump1_delta;
+
+        led_plc_start2 = start2_latched;
+        led_pump2_status= pump2;
+        led_pump2_star = pump2_star;
+        led_pump2_delta = pump2_delta;
+    end
+
+endmodule
